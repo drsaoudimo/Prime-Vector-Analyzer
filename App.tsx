@@ -47,7 +47,7 @@ const App: React.FC = () => {
     setComputing(true);
 
     try {
-      // No longer need setTimeout wrapper as analyzeNumber is now async and yields internally
+      // Async quantum-like factorization
       const resA = await analyzeNumber(inputA);
       setReportA(resA);
 
@@ -187,14 +187,17 @@ const App: React.FC = () => {
                <button
                 onClick={handleAnalyze}
                 disabled={computing}
-                className={`md:w-48 px-6 py-3 font-bold rounded-lg transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-auto h-[54px] ${mode === 'compare' ? 'bg-gradient-to-r from-cyan-700 to-purple-700 hover:from-cyan-600 hover:to-purple-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
+                className={`md:w-64 px-6 py-3 font-bold rounded-lg transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-auto h-[54px] ${mode === 'compare' ? 'bg-gradient-to-r from-cyan-700 to-purple-700 hover:from-cyan-600 hover:to-purple-600' : 'bg-cyan-700 hover:bg-cyan-600'}`}
               >
                 {computing ? (
-                  <Activity className="animate-spin w-5 h-5" />
+                  <div className="flex items-center gap-2">
+                    <Activity className="animate-spin w-5 h-5" />
+                    <span className="text-xs font-mono animate-pulse">QUANTUM PROCESSING...</span>
+                  </div>
                 ) : (
                   <>
                     <Zap className="w-5 h-5" />
-                    <span>{mode === 'compare' ? 'COMPARE' : 'ANALYZE'}</span>
+                    <span>{mode === 'compare' ? 'COMPARE' : 'ANALYZE (QUANTUM)'}</span>
                   </>
                 )}
               </button>
@@ -229,7 +232,7 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center text-slate-500 text-sm">
            <div className="flex items-center gap-2 mb-2 md:mb-0">
              <ShieldCheck className="w-4 h-4 text-slate-600" />
-             <span className="font-mono">PVA | Precision Algorithm v2.4</span>
+             <span className="font-mono">PVA | Precision Algorithm v2.5 (Brent-Rho/A1)</span>
            </div>
            <div className="flex items-center gap-2">
              <UserCircle className="w-4 h-4 text-cyan-500" />
