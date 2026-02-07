@@ -20,108 +20,158 @@ const addVectors = (v1: Vector, v2: Vector): Vector => {
   return v1.map((val, i) => val + (v2[i] || 0));
 };
 
-// --- QUANTUM WORKER KERNEL: BRENT'S OPTIMIZED RHO WITH A1 MATRIX INJECTION ---
+// --- QUANTUM WORKER KERNEL: HYPER-SPEED BRENT ---
 const QUANTUM_WORKER_BLOB = `
 self.onmessage = function(e) {
-    const { nStr, columnData, seedVal } = e.data;
+    const { nStr, startC, seedVal } = e.data;
     const n = BigInt(nStr);
     
-    // Binary GCD Algorithm (Optimized for Bitwise operations on BigInt)
+    // BINARY GCD: Optimized for V8 BigInt implementation
+    // Using bitwise ops where possible for speed
     const gcd = (a, b) => {
         if (a === 0n) return b;
         if (b === 0n) return a;
-        let k = 0n;
-        // Remove common factors of 2
+        let shift = 0n;
         while (((a | b) & 1n) === 0n) {
-            a >>= 1n;
-            b >>= 1n;
-            k++;
+            a >>= 1n; b >>= 1n; shift++;
         }
         while ((a & 1n) === 0n) a >>= 1n;
         while (b !== 0n) {
             while ((b & 1n) === 0n) b >>= 1n;
-            if (a > b) {
-                const t = b; b = a; a = t;
-            }
+            if (a > b) { const t = b; b = a; a = t; }
             b -= a;
         }
-        return a << k;
+        return a << shift;
+    };
+
+    // --- RAW BRENT-RHO: TURBO MODE ---
+    const solveRawBrent = (constantC, startY) => {
+        let c = BigInt(constantC);
+        let y = BigInt(startY);
+        let x = y;
+        let g = 1n;
+        let r = 1n;
+        let q = 1n;
+        
+        let xs = x;
+        let ys = y;
+
+        // HYPER-TUNING for 30+ Digits:
+        // GCD is the bottleneck. We increase batch size 'm' significantly.
+        // We perform 1000 multiplications before 1 GCD check.
+        const m = 1000n; 
+        
+        // Safety Limit
+        const STEPS_LIMIT = 50000000; 
+        let steps = 0;
+
+        // Pre-allocate diff to avoid GC churn (conceptual in JS)
+        let diff = 0n;
+
+        while (g === 1n && steps < STEPS_LIMIT) {
+            x = y;
+            
+            // Advance by power of 2 (Phase 1)
+            // Unrolled 4x for speed
+            const rNum = Number(r);
+            const rMod4 = rNum & 3;
+            const rSteps = rNum - rMod4;
+            
+            // Bulk steps
+            for (let i = 0; i < rSteps; i += 4) {
+                y = (y * y + c) % n;
+                y = (y * y + c) % n;
+                y = (y * y + c) % n;
+                y = (y * y + c) % n;
+            }
+            // Residual steps
+            for (let i = 0; i < rMod4; i++) {
+                y = (y * y + c) % n;
+            }
+            steps += rNum;
+
+            let k = 0n;
+            while (k < r && g === 1n) {
+                ys = y;
+                xs = x;
+                
+                // Determine batch limit
+                let condition = (r - k) < m ? (r - k) : m;
+                let limit = Number(condition);
+                
+                q = 1n;
+                
+                // UNROLLED INNER LOOP (Phase 2)
+                // We unroll 4x to minimize loop overhead and JIT checks.
+                // This is the "Hot Path" - optimized for throughput.
+                
+                let j = 0;
+                const limitMod4 = limit & 3;
+                const limitSteps = limit - limitMod4;
+
+                // Loop Unrolled Block
+                for (; j < limitSteps; j += 4) {
+                    // Step 1
+                    y = (y * y + c) % n;
+                    diff = x > y ? x - y : y - x;
+                    q = (q * diff) % n;
+
+                    // Step 2
+                    y = (y * y + c) % n;
+                    diff = x > y ? x - y : y - x;
+                    q = (q * diff) % n;
+
+                    // Step 3
+                    y = (y * y + c) % n;
+                    diff = x > y ? x - y : y - x;
+                    q = (q * diff) % n;
+
+                    // Step 4
+                    y = (y * y + c) % n;
+                    diff = x > y ? x - y : y - x;
+                    q = (q * diff) % n;
+                }
+
+                // Handle remaining iterations
+                for (; j < limit; j++) {
+                    y = (y * y + c) % n;
+                    diff = x > y ? x - y : y - x;
+                    q = (q * diff) % n;
+                }
+                
+                g = gcd(q, n);
+                k += BigInt(limit);
+            }
+            r <<= 1n;
+        }
+
+        // Backtracking logic (Standard)
+        if (g === n) {
+            while (true) {
+                ys = (ys * ys + c) % n;
+                diff = xs > ys ? xs - ys : ys - xs;
+                g = gcd(diff, n);
+                if (g > 1n) break;
+            }
+        }
+
+        return g;
     };
 
     try {
-        // We iterate through the specific column values of Matrix A1 assigned to this worker.
-        // This maps the matrix topology to the factorization attempts.
+        let factor = solveRawBrent(startC, seedVal);
         
-        for (let i = 0; i < columnData.length; i++) {
-            const c = BigInt(columnData[i]);
-            
-            // Brent's Algo Setup
-            let y = BigInt(seedVal) + BigInt(i); // Vary start point slightly per matrix row
-            let r = 1n;
-            let q = 1n;
-            let g = 1n;
-            let m = 128n; // Block size for GCD accumulation
-            let x = y;
-            let ys = y;
-
-            // Polynomial f(x) = x^2 + c mod n
-            const f = (v) => (v * v + c) % n;
-
-            // Loop limit per matrix element to avoid infinite loops on prime numbers
-            let stepLimit = 20000000; 
-            let steps = 0;
-
-            while (g === 1n && steps < stepLimit) {
-                x = y;
-                
-                // Advance y by r steps (Powers of 2: 1, 2, 4, 8...)
-                for (let j = 0; j < r; j++) {
-                    y = f(y);
-                }
-                
-                let k = 0n;
-                while (k < r && g === 1n) {
-                    ys = y;
-                    
-                    // Process in blocks of size m to reduce expensive GCD calls
-                    let conditionLimit = (r - k) < m ? (r - k) : m;
-                    // Force Number for loop comparison speed
-                    let limit = Number(conditionLimit); 
-                    
-                    for (let j = 0; j < limit; j++) {
-                        y = f(y);
-                        // Calculate product of differences |x - y|
-                        let diff = x > y ? x - y : y - x;
-                        q = (q * diff) % n;
-                    }
-                    
-                    g = gcd(q, n);
-                    k += BigInt(limit);
-                    steps += limit;
-                }
-                r *= 2n;
-            }
-
-            if (g === n) {
-                // Backtrack to find the specific factor if we overshot
-                while (true) {
-                    ys = f(ys);
-                    let diff = x > ys ? x - ys : ys - x;
-                    g = gcd(diff, n);
-                    if (g > 1n) break;
-                }
-            }
-
-            if (g > 1n && g < n) {
-                self.postMessage({ factor: g.toString() });
-                return;
-            }
-            
-            // If failed with this 'c' from Matrix A1, loop continues to next 'c' in the column
+        // Fallback: Aggressive polynomial switch
+        if (factor === 1n || factor === n) {
+             // Try c + 3 to jump to a different graph
+             factor = solveRawBrent(BigInt(startC) + 3n, seedVal);
         }
 
-        // All matrix parameters exhausted for this lane
-        self.postMessage({ factor: null });
+        if (factor > 1n && factor < n) {
+            self.postMessage({ factor: factor.toString() });
+        } else {
+            self.postMessage({ factor: null });
+        }
 
     } catch(err) {
         self.postMessage({ factor: null });
@@ -133,18 +183,10 @@ self.onmessage = function(e) {
 
 class QuantumFactoringArchitect {
     private workerBlobURL: string;
-    // We will transpose A1 to get columns for the workers
-    private A1_columns: number[][]; 
-
+    
     constructor() {
         const blob = new Blob([QUANTUM_WORKER_BLOB], { type: 'application/javascript' });
         this.workerBlobURL = URL.createObjectURL(blob);
-        
-        // Transpose A1 (19x6) into 6 columns of 19 rows
-        // This creates 6 unique "Search Lanes" based on the matrix structure
-        this.A1_columns = Array.from({ length: 6 }, (_, colIndex) => 
-            A1.map(row => row[colIndex])
-        );
     }
 
     private power(base: bigint, exp: bigint, mod: bigint): bigint {
@@ -158,7 +200,7 @@ class QuantumFactoringArchitect {
         return res;
     }
 
-    // High-Precision Miller-Rabin Primality Test
+    // High-Precision Miller-Rabin
     public isPrime(n: bigint): boolean {
         if (n < 2n) return false;
         if (n === 2n || n === 3n) return true;
@@ -171,7 +213,7 @@ class QuantumFactoringArchitect {
             s++;
         }
 
-        const bases = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n, 43n, 47n];
+        const bases = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n];
         for (const a of bases) {
             if (n <= a) break;
             let x = this.power(a, d, n);
@@ -189,18 +231,13 @@ class QuantumFactoringArchitect {
         return true;
     }
 
-    /**
-     * Parallel Deep-Dive Factorization using Brent's Method & Matrix A1
-     */
     private async findFactorParallel(n: bigint): Promise<bigint> {
         if (n % 2n === 0n) return 2n;
         if (this.isPrime(n)) return n;
 
-        // Determine concurrency. We want at least 6 workers to cover all 6 columns of A1.
-        // If hardware has fewer cores, we still spawn 6 to ensure matrix coverage.
-        // If hardware has more (e.g., 12), we double up on columns with different seeds.
-        const logicalCores = navigator.hardwareConcurrency || 6;
-        const workerCount = Math.max(6, logicalCores); // Ensure at least 6 lanes
+        const logicalCores = navigator.hardwareConcurrency || 4;
+        // Aggressive thread count for max throughput
+        const workerCount = Math.max(4, logicalCores); 
         
         const workers: Worker[] = [];
 
@@ -212,17 +249,27 @@ class QuantumFactoringArchitect {
                 workers.forEach(w => w.terminate());
             };
 
+            const flatA1 = A1.flat();
+
             for (let i = 0; i < workerCount; i++) {
                 const worker = new Worker(this.workerBlobURL);
                 workers.push(worker);
 
-                // Assign a column from Matrix A1 to this worker
-                // Worker 0 gets Col 0, Worker 6 gets Col 0, etc.
-                const columnIndex = i % 6;
-                const columnData = this.A1_columns[columnIndex];
-                
-                // Unique seed based on worker ID to ensure randomness even if sharing a column
-                const seedVal = Math.floor(Math.random() * 1000) + 2 + i * 100;
+                let startC: number;
+                let seedVal: number;
+
+                // Strategy: Cover maximum polynomial space
+                if (i === 0) {
+                    startC = 1; seedVal = 2; // Standard
+                } else if (i === 1) {
+                    startC = 3; seedVal = 5; 
+                } else if (i === 2) {
+                    startC = 5; seedVal = 7;
+                } else {
+                    // Matrix-guided diversification
+                    startC = flatA1[i % flatA1.length];
+                    seedVal = flatA1[(i * 3) % flatA1.length] + i;
+                }
 
                 worker.onmessage = (e) => {
                     if (resolved) return;
@@ -240,25 +287,26 @@ class QuantumFactoringArchitect {
 
                     activeWorkers--;
                     if (activeWorkers === 0 && !resolved) {
-                        resolve(0n); // All workers exhausted their matrix columns
+                        resolve(0n); 
                     }
                 };
 
                 worker.postMessage({
                     nStr: n.toString(),
-                    columnData: columnData, // Pass the Matrix A1 column
-                    seedVal: seedVal.toString()
+                    startC: startC.toString(), 
+                    seedVal: seedVal.toString(),
+                    workerId: i
                 });
             }
             
-            // Timeout 60s
+            // 3 Minute timeout for Massive Numbers
             setTimeout(() => {
                 if(!resolved) {
                     resolved = true;
                     cleanup();
                     resolve(0n);
                 }
-            }, 60000);
+            }, 180000);
         });
     }
 
@@ -269,8 +317,8 @@ class QuantumFactoringArchitect {
         const factors: bigint[] = [];
         let queue = [nVal];
 
-        // 1. Strip Small Factors (Trial Division)
-        const smallBasis = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n];
+        // 1. Main Thread Fast Sieve
+        const smallBasis = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n];
         let nextQueue: bigint[] = [];
         
         for(let num of queue) {
@@ -294,11 +342,10 @@ class QuantumFactoringArchitect {
                 continue;
             }
 
-            // Execute Parallel Brent's Rho with Matrix A1
             const factor = await this.findFactorParallel(current);
 
             if (factor === 0n || factor === current) {
-                factors.push(current); // Unresolved
+                factors.push(current); 
             } else {
                 queue.push(factor);
                 queue.push(current / factor);
@@ -421,28 +468,36 @@ export const analyzeNumber = async (nStr: string): Promise<MatrixAnalysisReport>
   // 6. Resonance Score
   const resonanceScore = calculateResonanceScore(eigenvalues, gradientData, projection);
 
-  // 7. Parallel Factor Detection (Brent's Optimized Rho with Matrix A1)
+  // 7. Parallel Factor Detection (RAW BRENT)
   const realFactorsBig = await architect.factorizeAsync(nBig);
   const realFactors = realFactorsBig.map(String);
   
-  // 8. Classification
+  // 8. Classification & Stability Logic
   let classification = ClassificationType.COMPOSITE;
+  let stability = StabilityState.UNSTABLE;
+
   if (nBig === 1n) {
       classification = ClassificationType.UNIT;
+      stability = StabilityState.CRITICAL;
   } else if (realFactorsBig.length === 1 && realFactorsBig[0] === nBig) {
       if (architect.isPrime(nBig)) {
           classification = ClassificationType.PRIME;
+          stability = StabilityState.STABLE;
       } else {
+          // Stubborn composite
           classification = ClassificationType.NON_PRIME_UNSTABLE;
       }
-  } else if (realFactorsBig.length === 2) {
-      classification = ClassificationType.SEMIPRIME;
+  } else {
+      if (realFactorsBig.length === 2) {
+          classification = ClassificationType.SEMIPRIME;
+      } else {
+          classification = ClassificationType.COMPOSITE;
+      }
+      
+      if (resonanceScore > 0.72) {
+          stability = StabilityState.STABLE;
+      }
   }
-  
-  // 9. Stability
-  let stability = StabilityState.UNSTABLE;
-  if (resonanceScore > 0.72 || classification === ClassificationType.PRIME) stability = StabilityState.STABLE;
-  if (classification === ClassificationType.UNIT) stability = StabilityState.CRITICAL;
   
   // 10. Prime Density
   let primeDensity = 0;
