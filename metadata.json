@@ -1,0 +1,5 @@
+{
+  "name": "Prime Vector Analyzer (PVA)",
+  "description": "A high-precision computational tool for natural number analysis using linear transformations, spectral projection, and matrix mechanics.",
+  "requestFramePermissions": []
+}
